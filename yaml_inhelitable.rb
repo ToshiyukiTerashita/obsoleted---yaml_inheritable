@@ -11,39 +11,57 @@ module YAML
   end
 
   def self.inheritable_load(str)
-    src = []
+    dst = []
     str.each{ |line|
-      line.gsub!(/ +#.*/, '')
+      line.gsub!(/ *#.*/, '')
       next if line.strip==""    # space only
-      src << line
+      dst << line
     }
-    src << "  " # sentinel
-    anchors = {}
-    a0 = {}
-    src.each_index{ |idx|
-      if src[idx] =~ %r{^( *).*&(\w+)}    # anchor start
-        a0[$2] = {:start=>idx+1, :indent=>$1.length}
-      elsif a0.size>0
-        indent = src[idx].index(/[^ ]/)
-        a0.select{ |k, v| v[:indent]>=indent }.each{ |k, v| # anchor end
+    dst << "\n" # sentinel
+
+    src = []
+    5.times {
+      break if src.size == dst.size
+      src = dst; dst = []
+      anchors = {}
+      a0 = {}
+      src.each_index{ |idx|
+        next unless src[idx+1]
+        line = src[idx]
+        line =~ %r{^ *.*&(\w+)}; anc = $1
+        idt = line.index(/[^ ]/)
+        ndt = src[idx+1].index(/[^ ]/)
+        a0[anc] = {:start=>idx+1, :indent=>idt} if anc    # anchor start
+        a0.select{ |k, v| v[:indent]>=idt }.each{ |k, v|
+          next if k==anc
+          # anchor end
           a0.delete(k)
           anchors[k] = v.merge({:end=>idx-1})
         }
-      end
+      }
+      src.each_index{ |idx|
+        line = src[idx]
+        if line =~ %r{^ *(:?\w+:) *\*\|(\w+)} && anchors[$2]
+          word = $1; anc = $2
+          idt = " "*line.index(/[^ ]/)
+          ndt = " "*src[idx+1].index(/[^ ]/)
+          if idt >= ndt
+            dst << "#{idt}#{word} *#{anc}\n"
+          else
+            dst << "#{idt}#{word}\n"
+            a0 = anchors[anc]
+            idt = src[a0[:start]].index(/[^ ]/)
+            src[a0[:start]..a0[:end]].each{ |l|
+              dst << ndt + ' '*(l.index(/[^ ]/) - idt) + l.lstrip
+            }
+          end
+        else
+          dst << line
+        end
+      }
     }
-    dst = []
-    src.each_index{ |idx|
-      line = src[idx]
-      if line =~ %r{^( *)(\w+ *:) *\*\| *(\w+)} && anchors[$3]
-        dst << $1+$2+"\n"
-        a0 = anchors[$3]
-        indent = " "*src[idx+1].index(/[^ ]/)
-        src[a0[:start]..a0[:end]].each{ |l|
-          dst << indent+l.lstrip
-        }
-      else
-        dst << line
-      end
+    dst.collect!{|line|
+      line=~%r{^( *:?\w+:) *\*\|\w+} ? $1+"\n" : line
     }
     y = parser.load(dst.to_s)
   end
